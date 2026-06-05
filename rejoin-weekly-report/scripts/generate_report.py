@@ -5,8 +5,14 @@
 
 import argparse
 import json
+import socket
 from datetime import datetime
 from pathlib import Path
+
+
+def get_hostname() -> str:
+    """获取当前计算机名（去掉 .local 等后缀）"""
+    return socket.gethostname().split(".")[0]
 
 
 WEEKLY_REPORT_TEMPLATE = """# {title}
@@ -25,15 +31,11 @@ WEEKLY_REPORT_TEMPLATE = """# {title}
 
 ### 本周目标与背景
 
-> 此处理由 Agent/AI 根据扫描结果填充，脚本只提供数据框架。
-
-本周核心项目分布：
+> 这周为什么做这些事（客户痛点 / 内部目标 / 项目节点），不要只写"做了 X 功能"。
 
 {project_summary}
 
 ### 本周最重要的目标
-
-> 此处由人工确认并填写。
 
 1. **[目标一]**
 2. **[目标二]**
@@ -41,7 +43,7 @@ WEEKLY_REPORT_TEMPLATE = """# {title}
 
 ### 判断完成的标准
 
-> 此处由人工确认并填写。
+> 怎么叫完成？由谁确认？看什么结果？
 
 ---
 
@@ -49,8 +51,10 @@ WEEKLY_REPORT_TEMPLATE = """# {title}
 
 ### 已完成与未完成工作
 
-> 以下为基于会话标题自动提取的工作项概览，请人工补充状态和证据。
+> ✅完成 / 🔄部分完成 / ❌未开始  |  "已完成"必须带证据；"未完成"必须写原因和后续动作。
 
+| 工作项 | 状态 | 证据 / 结果 | 备注 |
+|--------|------|-------------|------|
 {work_items}
 
 ---
@@ -61,66 +65,123 @@ WEEKLY_REPORT_TEMPLATE = """# {title}
 
 {evidence_types}
 
+> 最少覆盖 2 类不同证据，不要只有一张页面图。推荐组合：页面 + PR、日志 + 会议纪要。
+
+### 证据截图区
+
+> 每张图下面补一句"它证明了什么"。
+
+**证据图 1**（页面效果 / 系统截图）
+
+*[贴图位置]*
+
+> 证明了：
+
+**证据图 2**（PR / 测试 / 构建日志）
+
+*[贴图位置]*
+
+> 证明了：
+
+**证据图 3**（会议纪要 / 客户反馈）
+
+*[贴图位置]*
+
+> 证明了：
+
 ---
 
 ## 四、AI 协作
 
 ### AI 协作总览
 
-| 工具 | 会话数 | 总消息数 | 主要用途 |
-|------|--------|----------|----------|
+| 任务类型 | 使用场景 / 为什么用 AI | 最终结论 |
+|----------|------------------------|----------|
 {tool_stats}
+
+### 人工审查说明
+
+> 不要只写"用了 AI"。写清楚：输入 → 输出 → 审查 → 采纳 / 拒绝。
+
+### 本次 AI 协作最值得讲的 2 件事
+
+1. **[最关键的一次使用]**
+2. **[最能体现人工审查的一次使用]**
 
 ---
 
 ## 五、价值与指标
 
-> 此处需人工补充。
-
 | 指标项 | 上周/基准 | 本周结果 | 下周目标 | 说明 |
 |--------|-----------|----------|----------|------|
-| [指标 1] | - | - | - | - |
+| [指标 1] | [基准值] | [结果值] | [目标值] | [为什么重要] |
+| [指标 2] | [基准值] | [结果值] | [目标值] | [为什么重要] |
+| [指标 3] | [基准值] | [结果值] | [目标值] | [为什么重要] |
+
+> 尽量写变化而非静态数字。无法量化时用"数量 + 状态"组合。
 
 ---
 
 ## 六、风险与问题
 
-> 此处需人工补充。
+| 风险 / 问题 | 状态 | 影响 | 缓解动作 | 责任人 / 截止时间 |
+|-------------|------|------|----------|-------------------|
+| [问题 1] | 🔴打开 | [会影响什么] | [已做什么] | [谁 / 日期] |
+| [问题 2] | 🟡缓解中 | [会影响什么] | [已做什么] | [谁 / 日期] |
+| [问题 3] | 🟢关闭 | [会影响什么] | [已做什么] | [谁 / 日期] |
+
+> 不要只写"有风险"。必须有状态、影响、动作、责任人。已关闭的问题也可保留 1 条证明闭环。
 
 ---
 
-## 七、下周计划（按天）
+## 七、下周计划
 
-> 此处由 Agent 按天填写，每天包含工作内容和验收标准。未排满 5 天时说明剩余天数用途。
+### 下周任务（按天）
 
-| 日期 | 工作内容 | 验收标准 |
-|------|----------|----------|
-| 周一 | [工作内容] | [怎么叫完成] |
-| 周二 | [工作内容] | [怎么叫完成] |
-| 周三 | [工作内容] | [怎么叫完成] |
-| 周四 | [工作内容] | [怎么叫完成] |
-| 周五 | [工作内容] | [怎么叫完成] |
+| 日期 | 工作内容 | 验收标准 | 负责人 |
+|------|----------|----------|--------|
+| 周一 | [工作内容] | [怎么叫完成] | [姓名] |
+| 周二 | [工作内容] | [怎么叫完成] | [姓名] |
+| 周三 | [工作内容] | [怎么叫完成] | [姓名] |
+| 周四 | [工作内容] | [怎么叫完成] | [姓名] |
+| 周五 | [工作内容] | [怎么叫完成] | [姓名] |
 
 ### 需要谁支持
 
-> 此处由人工确认并填写。
+> 数据 owner / 业务 owner / QA / 研发同学
 
 ### 需要什么决策
 
-> 此处由人工确认并填写。
+> 需要团队确认的事项
 
 ---
 
 ## 八、复盘与自检
 
+### 这周做得好的
+
+1. [继续保持的 2-3 点]
+2. ...
+3. ...
+
+### 这周做得不好的
+
+1. [需要修正的 2-3 点]
+2. ...
+3. ...
+
+### 下周要改变什么
+
+> 把复盘转成动作：问题 → 原因 → 改进 → 验证
+
 ### 提交前自检
 
-- [ ] 目标和背景写清楚了
-- [ ] 已完成 / 未完成都写了
-- [ ] 至少包含 2 类不同证据
-- [ ] AI 协作页写了人工审查过程
+- [ ] 目标和背景写清楚了（别人能看懂这周为什么做）
+- [ ] 已完成 / 未完成都写了（未完成项有原因和后续动作）
+- [ ] 至少包含 2 类不同证据（不要只有一张页面图）
+- [ ] AI 协作页写了人工审查过程（输入 → 输出 → 审查 → 采纳/拒绝）
 - [ ] 风险标了状态、影响、动作、责任人
-- [ ] 下周计划按天列出工作内容和验收标准
+- [ ] 下周计划按天列出工作内容、验收标准和负责人
 """
 
 
@@ -144,7 +205,9 @@ def generate_report(data: dict, reporter: str, week: int, title: str) -> str:
             if title_text and len(title_text) > 5:
                 work_lines.append(f"| [{proj}] {title_text[:80]} | 待确认 | 待补充 | 待补充 |")
 
-    work_items = "\n".join(work_lines) if work_lines else "| （请根据扫描数据手动填写） | | | |"
+    if not work_lines:
+        work_lines.append("| （请根据扫描数据手动填写） | 待确认 | 待补充 | 待补充 |")
+    work_items = "\n".join(work_lines)
 
     # 证据类型
     evidence_lines = []
@@ -160,8 +223,10 @@ def generate_report(data: dict, reporter: str, week: int, title: str) -> str:
         tool_counts[t] = tool_counts.get(t, 0) + 1
 
     for tool_name, count in sorted(tool_counts.items(), key=lambda x: -x[1]):
-        tool_stats_lines.append(f"| {tool_name} | {count} | - | - |")
-    tool_stats = "\n".join(tool_stats_lines) if tool_stats_lines else "| - | - | - | - |"
+        tool_stats_lines.append(f"| {tool_name} | {count} 个会话 | 待补充 |")
+    if not tool_stats_lines:
+        tool_stats_lines.append("| - | - | - |")
+    tool_stats = "\n".join(tool_stats_lines)
 
     return WEEKLY_REPORT_TEMPLATE.format(
         title=title,
@@ -179,7 +244,7 @@ def main():
     parser = argparse.ArgumentParser(description="生成周报 Markdown")
     parser.add_argument("--input", required=True, help="扫描结果 JSON 文件")
     parser.add_argument("--output", required=True, help="输出 Markdown 文件路径")
-    parser.add_argument("--reporter", required=True, help="汇报人 姓名/角色")
+    parser.add_argument("--reporter", help="汇报人（默认使用本机计算机名）")
     parser.add_argument("--week", type=int, help="周数（默认自动计算）")
     parser.add_argument("--title", help="汇报标题")
     args = parser.parse_args()
@@ -188,11 +253,13 @@ def main():
         data = json.load(f)
 
     if args.week is None:
-        # 简单计算：从 1 月 1 日算起
         args.week = datetime.now().isocalendar()[1]
 
     if args.title is None:
-        args.title = f"定制平台开发组 第 {args.week} 周工作展示汇报"
+        args.title = f"青岛红创 第 {args.week} 周工作展示汇报"
+
+    if args.reporter is None:
+        args.reporter = get_hostname()
 
     report = generate_report(data, args.reporter, args.week, args.title)
 
