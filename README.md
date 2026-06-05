@@ -40,7 +40,7 @@ npx skills@latest add qdhaiqiang/skills --skill rejoin-weekly-report
 
 **特性**：
 - 直读 rejoin SQLite 数据库，无需 HTTP API
-- 自动排除指定项目（默认排除 `chuangke_platform`）
+- 支持通过 `--exclude` 排除指定项目
 - 按项目归类汇总，生成 8 模块标准周报
 - 输出 Markdown + 蓝白主题 HTML
 

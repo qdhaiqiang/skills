@@ -27,7 +27,6 @@ def normalize_project(cwd: str) -> str:
 
     mapping = [
         ("customplatform", "customplatform"),
-        ("chuangke_platform", "chuangke_platform"),
         ("chutian-scada", "chutian-scada"),
         ("chutian-batch", "chutian-batch"),
         ("zhongshi_main", "zhongshi_main"),
@@ -123,7 +122,7 @@ def main():
     parser = argparse.ArgumentParser(description="扫描 rejoin Agent 会话")
     parser.add_argument("--output", required=True, help="输出 JSON 文件路径")
     parser.add_argument("--db", default=default_db, help="rejoin 数据库路径")
-    parser.add_argument("--exclude", action="append", default=["chuangke_platform"],
+    parser.add_argument("--exclude", action="append", default=[],
                         help="要排除的项目关键字（可多次指定）")
     parser.add_argument("--since", default=get_week_start(),
                         help="起始日期 YYYY-MM-DD（默认本周一）")
