@@ -4,13 +4,28 @@ Agent Skills 集合，适用于 pi、Claude Code、Codex 等 AI 编码助手。
 
 ## 安装
 
-使用 `npx add` 一键安装指定 skill：
+### npx 一键安装（推荐）
 
 ```bash
-npx add qdhaiqiang/skills/rejoin-weekly-report
+npx @qdhaiqiang/skills add rejoin-weekly-report
 ```
 
-这会将 skill 安装到 `~/.agents/skills/` 目录，AI 助手启动时自动发现并加载。
+这会将 skill 安装到 `~/.agents/skills/`，pi、Claude Code、Codex 启动时自动发现并加载。
+
+其他命令：
+
+```bash
+npx @qdhaiqiang/skills list          # 列出所有可用 skill
+npx @qdhaiqiang/skills               # 显示帮助
+```
+
+### pi 用户
+
+```bash
+pi install git:github.com/qdhaiqiang/skills
+```
+
+这会将整个仓库克隆到 pi 的包目录，pi 启动时自动加载所有 skills。
 
 ## 可用 Skills
 
@@ -19,7 +34,7 @@ npx add qdhaiqiang/skills/rejoin-weekly-report
 从本地 [rejoin](https://github.com/badlogic/rejoin) 工具扫描多个 Agent（pi、codex、claude）在多个项目上的开发会话日志，自动汇总生成个人周报（Markdown + HTML）。
 
 ```bash
-npx add qdhaiqiang/skills/rejoin-weekly-report
+npx @qdhaiqiang/skills add rejoin-weekly-report
 ```
 
 **使用方式**：
@@ -39,14 +54,17 @@ npx add qdhaiqiang/skills/rejoin-weekly-report
 每个 skill 是一个独立目录，包含 `SKILL.md` 入口文件和配套脚本：
 
 ```
-skills/
-├── rejoin-weekly-report/
-│   ├── SKILL.md              # skill 入口（名称、描述、使用说明）
-│   ├── scripts/              # 辅助脚本
-│   │   ├── scan_sessions.py
-│   │   └── generate_report.py
-│   └── references/           # 参考文档
-│       └── template.md
+├── package.json              # npm 包 + pi 清单
+├── bin/
+│   └── install.js            # npx 安装器 CLI
+├── skills/                   # pi 约定目录
+│   └── rejoin-weekly-report/
+│       ├── SKILL.md          # skill 入口（名称、描述、使用说明）
+│       ├── scripts/          # 辅助脚本
+│       │   ├── scan_sessions.py
+│       │   └── generate_report.py
+│       └── references/       # 参考文档
+│           └── template.md
 └── README.md
 ```
 
