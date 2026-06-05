@@ -7,58 +7,73 @@ description: 从本地 rejoin 工具扫描本机所有 Agent（pi、codex、clau
 
 从 rejoin 的 SQLite 数据库中直接查询**本机所有 Agent（pi、codex、claude 等）在所有项目上的会话**，按项目归类汇总，生成符合公司周报模板的 Markdown 文档和蓝白主题 HTML 网页。
 
-**重要：扫描覆盖本机全部项目和全部 Agent 工具，不受当前工作目录影响，不要只关注当前所在项目。**
+## 核心规则（必须遵守）
 
-## 工作流程
+1. **只运行本 skill 自带的脚本**，不得自行编写新的 Python 脚本、不得遍历 Git 仓库、不得用其他方式收集数据
+2. **数据来源只有 rejoin 的 SQLite 数据库**（默认 `~/.local/share/rejoin/index.db`）
+3. **扫描覆盖本机全部项目和全部 Agent 工具**，不受当前工作目录影响
+4. 脚本路径相对于本 SKILL.md 所在目录，即 `{SKILL_DIR}/scripts/`
 
-0. **确保 rejoin 在运行**：如果 rejoin 未运行，先执行 `rejoin` 或 `rejoin-tui` 启动它（rejoin 负责采集 Agent 会话数据到 SQLite 数据库）
-1. 运行扫描脚本，从 rejoin 数据库中提取会话数据
-2. 过滤掉指定项目（由用户通过 --exclude 指定）
-3. 按项目分组、分析会话标题和内容
-4. 生成 Markdown 周报，再转换为 HTML
-
-## 使用方式
+## 执行流程（严格按顺序执行）
 
 ### 步骤 0：确保 rejoin 在运行
+
+执行以下命令，检查并启动 rejoin：
 
 ```bash
 # 检查 rejoin 是否在运行，没有则启动
 pgrep -f rejoin || rejoin &
 ```
 
-### 步骤 1：扫描并生成原始数据
+### 步骤 1：运行扫描脚本（提取 rejoin 数据库中的会话数据）
+
+执行以下命令，将 `{SKILL_DIR}` 替换为 SKILL.md 所在目录的实际路径：
 
 ```bash
-python3 scripts/scan_sessions.py \
-  --output /tmp/rejoin_weekly.json
+python3 {SKILL_DIR}/scripts/scan_sessions.py --output /tmp/rejoin_weekly.json
 ```
 
-参数：
+如果用户指定了要排除的项目，加上 `--exclude` 参数：
+
+```bash
+python3 {SKILL_DIR}/scripts/scan_sessions.py --output /tmp/rejoin_weekly.json --exclude 项目名
+```
+
 - `--output`：输出 JSON 文件路径（必填）
-- `--exclude`：要排除的项目名关键字，可多次指定（可选）
+- `--exclude`：要排除的项目关键字，可多次指定（可选）
 - `--since`：起始日期 `YYYY-MM-DD`（可选，默认本周一）
-- `--db`：rejoin 数据库路径（可选，默认 `~/.local/share/rejoin/index.db`）
+- 脚本直读 `~/.local/share/rejoin/index.db`，无需额外配置
 
 ### 步骤 2：生成 Markdown 周报
 
+执行以下命令：
+
 ```bash
-python3 scripts/generate_report.py \
-  --input /tmp/rejoin_weekly.json \
-  --output /path/to/周报.md
+python3 {SKILL_DIR}/scripts/generate_report.py --input /tmp/rejoin_weekly.json --output /tmp/周报.md
 ```
 
-参数：
-- `--input`：步骤 1 输出的 JSON 文件（必填）
-- `--output`：输出的 Markdown 文件路径（必填）
-- `--reporter`：汇报人姓名/角色（可选，默认使用本机计算机名）
-- `--week`：周数（可选，默认计算当前是第几周）
+如果用户指定了汇报人，加上 `--reporter`：
+
+```bash
+python3 {SKILL_DIR}/scripts/generate_report.py --input /tmp/rejoin_weekly.json --output /tmp/周报.md --reporter "张三"
+```
+
+- `--reporter`：汇报人（可选，默认本机计算机名）
+- `--week`：周数（可选，默认当前周）
 - `--title`：汇报标题（可选，默认"青岛红创 第 N 周工作展示汇报"）
 
-### 步骤 3：Agent 填充内容（含按天工作计划）
+### 步骤 3：读取扫描结果并填充报告
 
-报告框架生成后，Agent 会���根据扫描结果填入各模块内容。**必须覆盖扫描结果中的所有项目**，不要只关注当前所在目录对应的项目。每个项目的关键工作都要体现在报告各模块中。
+1. 读取 `/tmp/rejoin_weekly.json` 了解所有项目的会话数据
+2. 读取步骤 2 生成的 `/tmp/周报.md` 模板
+3. **根据扫描结果中的全部项目**，逐模块填充报告内容，不要只关注当前目录对应的项目
+4. 将填充后的最终报告写入 `/tmp/周报_final.md`
 
-**特别注意"下周计划"应按天输出**，每天包含：
+填充要点：
+
+**必须覆盖扫描结果中的所有项目**，不要只关注当前所在目录对应的项目。每个项目的关键工作都要体现在报告各模块中。
+
+"下周计划"按天输出，每天包含：
 - 工作内容（要做什么、涉及哪些模块）
 - 验收标准（怎么叫完成、可验证的结果）
 
@@ -73,23 +88,18 @@ python3 scripts/generate_report.py \
 | ... | ... | ... | ... |
 ```
 
-### 步骤 4：生成 HTML（在 Agent 中）
+### 步骤 4：生成 HTML
 
-报告生成后，请 Agent 将 Markdown 转换为蓝白主题 HTML：
-
-```
-请将 {output}.md 的内容转换为蓝白主题的 HTML 网页，保存为 {output}.html
+将最终 Markdown 转换为蓝白主题 HTML，写入 `/tmp/周报_final.html`：
 要求：
 - 页面内容区域最大宽度 1200px，居中对齐
-- 蓝白主题（blue-50 ~ blue-900）
-- 白色卡片式布局，蓝色渐变封面
+- 蓝白主题（blue-50 ~ blue-900），白色卡片式布局，蓝色渐变封面
 - 表格：蓝灰色表头，悬停高亮
-- 状态徽章：绿（✅完成）/ 黄（🔄部分完成）/ 红（❌未开始 / 🔴打开）
+- 状态徽章：绿／黄／红
 - 下周计划按天表格，含"负责人"列
 - 响应式 + 打印友好
-```
 
-## 周报模板结构
+## 周报模板（8 个模块，填充时参考）
 
 生成的报告包含 8 个标准模块：
 1. 目标与背景
