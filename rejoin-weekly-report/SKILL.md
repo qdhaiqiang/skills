@@ -9,10 +9,11 @@ description: 从本地 rejoin 工具扫描本机所有 Agent（pi、codex、clau
 
 ## 核心规则（必须遵守）
 
-1. **只运行本 skill 自带的脚本**，不得自行编写新的 Python 脚本、不得遍历 Git 仓库、不得用其他方式收集数据
+1. **只运行本 skill 自带的脚本**，不得自行编写新的 Python 脚本、不得遍历 Git 仓库、不得读取 `git log` / commit / PR、不得用其他方式收集数据
 2. **数据来源只有 rejoin 的 SQLite 数据库**（默认 `~/.local/share/rejoin/index.db`）
 3. **扫描覆盖本机全部项目和全部 Agent 工具**，不受当前工作目录影响
 4. 脚本路径相对于本 SKILL.md 所在目录，即 `{SKILL_DIR}/scripts/`
+5. **生成内容必须保守**：只能陈述 rejoin 会话能直接支持的事实，不能把推测内容、git 提交记录、他人工作结果写成当前汇报人的周报结论
 
 ## 执行流程（严格按顺序执行）
 
@@ -67,11 +68,20 @@ python3 {SKILL_DIR}/scripts/generate_report.py --input /tmp/rejoin_weekly.json -
 1. 读取 `/tmp/rejoin_weekly.json` 了解所有项目的会话数据
 2. 读取步骤 2 生成的 `/tmp/周报.md` 模板
 3. **根据扫描结果中的全部项目**，逐模块填充报告内容，不要只关注当前目录对应的项目
-4. 将填充后的最终报告写入 `/tmp/周报_final.md`
+4. 将填充后的最终报告写入与标题一致的文件名，例如标题是 `青岛红创 第 24 周工作展示汇报`，则写入 `/tmp/青岛红创 第 24 周工作展示汇报.md`
 
 填充要点：
 
 **必须覆盖扫描结果中的所有项目**，不要只关注当前所在目录对应的项目。每个项目的关键工作都要体现在报告各模块中。
+
+**摘要必须自然可读**：优先使用 AI 生成标题、codex/rejoin 摘要，或从 prompt 中提取去噪后的完整语义句子；不要直接截取原始 prompt 开头几十个字，更不要把环境信息、角色设定、XML/Markdown 标签直接展示到周报或 HTML 中。
+
+**内容必须保守且可追溯**：可以在“会话列表”基础上做归纳，但所有结论都必须能回指到具体 rejoin 会话；不能凭空补“已完成”“负责人是谁”“谁支持了什么”“价值提升了多少”，更不能把代码库里的 git commit、PR、他人提交记录算进当前汇报人周报。
+
+**如果无法从 rejoin 直接证明**：
+- 工作状态写“待确认”
+- 完成标准写“需人工补充”
+- 责任人、支持方、决策项、指标结果一律要求人工确认后再提交
 
 "下周计划"按天输出，每天包含：
 - 工作内容（要做什么、涉及哪些模块）
@@ -90,7 +100,7 @@ python3 {SKILL_DIR}/scripts/generate_report.py --input /tmp/rejoin_weekly.json -
 
 ### 步骤 4：生成 HTML
 
-将最终 Markdown 转换为蓝白主题 HTML，写入 `/tmp/周报_final.html`：
+将最终 Markdown 转换为蓝白主题 HTML，文件名必须与报告标题完全一致，例如 `/tmp/青岛红创 第 24 周工作展示汇报.html`：
 要求：
 - 页面内容区域最大宽度 1200px，居中对齐
 - 蓝白主题（blue-50 ~ blue-900），白色卡片式布局，蓝色渐变封面
@@ -98,6 +108,7 @@ python3 {SKILL_DIR}/scripts/generate_report.py --input /tmp/rejoin_weekly.json -
 - 状态徽章：绿／黄／红
 - 下周计划按天表格，含"负责人"列
 - 响应式 + 打印友好
+- HTML `<title>`、封面主标题、输出文件名三者必须完全一致，统一使用最终周报标题
 
 ## 周报模板（8 个模块，填充时参考）
 
@@ -114,8 +125,9 @@ python3 {SKILL_DIR}/scripts/generate_report.py --input /tmp/rejoin_weekly.json -
 ## 注意事项
 
 - 脚本只做数据提取和初步归类，不会自动填充所有模板字段
-- 目标、风险、下周计划（按天）等需要人工判断的内容，由 Agent 根据扫描结果推断填充
+- 目标、风险、下周计划（按天）等需要人工判断的内容，Agent 只能给出基于 rejoin 的候选草稿；**不能把推断内容直接写成最终事实**
 - **下周计划必须按天列出**，未排满 5 天时说明剩余天数安排
 - rejoin 服务需要在运行时保持数据库更新（正常启动即可，脚本直读 SQLite 不依赖 API）。**Agent 生成周报时必须先检查 rejoin 是否在运行，未运行则执行 `rejoin` 启动。**
 - **扫描脚本直读全局 SQLite 数据库，返回本机所有 Agent 在所有项目上的全部会话。Agent 填充报告时必须覆盖所有项目，不受当前工作目录影响。**
+- **严禁把 git 仓库中的 commit、PR、代码修改历史当成周报数据源。** 本 skill 的唯一数据源是本地 rejoin SQLite。
 - rejoin 对 AI 最友好，rejoin-tui 是交互式 TUI 界面不适合 AI 调用。扫描脚本直接用 SQLite 读取是最佳方式。

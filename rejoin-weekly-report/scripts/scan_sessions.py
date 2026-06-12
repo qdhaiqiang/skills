@@ -54,6 +54,90 @@ def normalize_project(cwd: str) -> str:
     return cwd
 
 
+NOISE_PATTERNS = [
+    r"^<[^>]+>$",
+    r"^#+\s*",
+    r"^(cwd|shell|current_date|timezone|filesystem|environment_context)\b",
+    r"^(user|assistant|system|developer)\b",
+    r"^(你是|you are)\b",
+    r"^(工作目录|当前日期|时区|文件系统)\b",
+]
+
+
+def clean_text(text: str) -> str:
+    """清理提示词中的标签、代码块和多余空白。"""
+    if not text:
+        return ""
+
+    text = re.sub(r"```.*?```", " ", text, flags=re.S)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = text.replace("\r", "\n")
+    text = re.sub(r"\u200b", "", text)
+    return text
+
+
+def is_noise_line(line: str) -> bool:
+    """过滤环境信息、角色提示和结构噪音。"""
+    if len(line) < 6:
+        return True
+
+    for pattern in NOISE_PATTERNS:
+        if re.match(pattern, line, flags=re.I):
+            return True
+
+    return False
+
+
+def build_summary(*candidates: str, limit: int = 140) -> str:
+    """从多个候选文本中提取更自然的会话摘要。"""
+    sentences = []
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+
+        cleaned = clean_text(candidate)
+        for raw_line in cleaned.split("\n"):
+            line = re.sub(r"\s+", " ", raw_line).strip(" -*\t")
+            if not line or is_noise_line(line):
+                continue
+
+            parts = re.split(r"(?<=[。！？!?；;])\s+|[。！？!?；;]\s*", line)
+            for part in parts:
+                part = re.sub(r"\s+", " ", part).strip(" ,.:;，。；：")
+                if len(part) < 8 or is_noise_line(part):
+                    continue
+                sentences.append(part)
+
+        if sentences:
+            break
+
+    if not sentences:
+        fallback = next((clean_text(c) for c in candidates if c), "")
+        fallback = re.sub(r"\s+", " ", fallback).strip()
+        return fallback[:limit]
+
+    summary = ""
+    for sentence in sentences:
+        next_summary = f"{summary}；{sentence}" if summary else sentence
+        if len(next_summary) > limit:
+            break
+        summary = next_summary
+        if len(summary) >= 60:
+            break
+
+    return summary[:limit]
+
+
+def build_title(ai_title: str, codex_summary: str, summary: str) -> str:
+    """优先使用 AI 标题，否则从摘要中生成更自然的展示标题。"""
+    for candidate in (ai_title, codex_summary, summary):
+        title = re.sub(r"\s+", " ", clean_text(candidate)).strip(" -:：")
+        if len(title) >= 6:
+            return title[:80]
+    return ""
+
+
 def scan_sessions(db_path: str, exclude: list[str], since: str) -> list[dict]:
     """从 rejoin 数据库中读取会话列表"""
     if not Path(db_path).exists():
@@ -92,12 +176,12 @@ def scan_sessions(db_path: str, exclude: list[str], since: str) -> list[dict]:
             continue
 
         # 提取摘要
-        title = d.get("ai_title") or ""
+        ai_title = d.get("ai_title") or ""
+        codex_summary = d.get("codex_summary") or ""
         first_prompt = d.get("first_prompt") or ""
         last_prompt = d.get("last_prompt") or ""
-
-        # 用 first_prompt 的前 300 字符作为摘要
-        summary = first_prompt[:300] if first_prompt else (last_prompt[:300] if last_prompt else title[:300])
+        summary = build_summary(codex_summary, ai_title, first_prompt, last_prompt)
+        title = build_title(ai_title, codex_summary, summary)
 
         sessions.append({
             "id": d["id"],
@@ -111,6 +195,8 @@ def scan_sessions(db_path: str, exclude: list[str], since: str) -> list[dict]:
             "model": d.get("model"),
             "title": title,
             "summary": summary,
+            "raw_title": ai_title,
+            "codex_summary": codex_summary,
         })
 
     return sessions
@@ -146,7 +232,15 @@ def main():
             "total_messages": sum(s["message_count"] for s in items),
             "tools_used": list(set(s["tool"] for s in items)),
             "top_sessions": [
-                {"id": s["id"], "title": s["title"], "summary": s["summary"]}
+                {
+                    "id": s["id"],
+                    "tool": s["tool"],
+                    "title": s["title"],
+                    "summary": s["summary"],
+                    "message_count": s["message_count"],
+                    "tool_call_count": s["tool_call_count"],
+                    "last_activity": s["last_activity"],
+                }
                 for s in items[:5]
             ],
         }

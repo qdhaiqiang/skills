@@ -43,6 +43,9 @@ npx skills@latest add qdhaiqiang/skills --skill rejoin-weekly-report
 - 支持通过 `--exclude` 排除指定项目
 - 按项目归类汇总，生成 8 模块标准周报
 - 输出 Markdown + 蓝白主题 HTML
+- 会话摘要会自动去噪，避免直接截取 pi / codex prompt 开头造成生硬展示
+- HTML 文件名、页面标题与周报标题保持一致
+- 仅以本地 rejoin 会话为数据源，不读取 git commit / PR / 仓库变更历史
 
 ## 目录结构
 
