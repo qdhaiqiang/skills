@@ -233,15 +233,32 @@ python3 {SKILL_DIR}/scripts/generate_report.py --input rejoin_weekly.json --outp
 
 ### 步骤 4：生成 HTML
 
-将最终 Markdown 转换为蓝白主题 HTML，文件名必须与报告标题完全一致（标题中的空格替换为短线 `-`），例如 `青岛红创-第-24-周工作展示汇报.html`：
-要求：
+使用本 skill 自带的 HTML 生成脚本，将最终 Markdown 转换为蓝白主题 HTML：
+
+```bash
+python3 {SKILL_DIR}/scripts/generate_html.py \
+  --input 最终周报.md \
+  --output 青岛红创-第-24-周工作展示汇报.html
+```
+
+如果 Markdown 文件第一行是 `# 标题`，`--title` 参数可省略。如需自定义标题：
+
+```bash
+python3 {SKILL_DIR}/scripts/generate_html.py \
+  --input 最终周报.md \
+  --title "青岛红创 第 24 周工作展示汇报" \
+  --output 青岛红创-第-24-周工作展示汇报.html
+```
+
+**命名规则**：输出文件名必须与报告标题完全一致（标题中的空格替换为短线 `-`），例如标题是 `青岛红创 第 24 周工作展示汇报`，则输出 `青岛红创-第-24-周工作展示汇报.html`。
+
+脚本内置要求：
 - 页面内容区域最大宽度 1200px，居中对齐
 - 蓝白主题（blue-50 ~ blue-900），白色卡片式布局，蓝色渐变封面
 - 表格：蓝灰色表头，悬停高亮
-- 状态徽章：绿／黄／红
-- 下周计划按天表格，含"负责人"列
+- 状态徽章（✅ 🔄 ❌ 🔴 🟡 🟢 自动转换为彩色徽章）
 - 响应式 + 打印友好
-- HTML `<title>`、封面主标题、输出文件名三者必须完全一致，统一使用最终周报标题
+- HTML `<title>`、封面主标题、输出文件名三者完全一致
 
 ## 周报模板（8 个模块，填充时参考）
 
