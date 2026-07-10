@@ -9,9 +9,20 @@
 
 import argparse
 import json
+import re
 import socket
 from datetime import datetime
 from pathlib import Path
+
+
+def normalize_filename(name: str) -> str:
+    """将文件名中的空格替换为短线，去除其他非法字符"""
+    name = name.strip()
+    # 空格 → 短线
+    name = re.sub(r'\s+', '-', name)
+    # 去除路径中不允许的字符（保留中文、字母、数字、短线、下划线、点）
+    name = re.sub(r'[\\/:*?"<>|]', '', name)
+    return name
 
 
 def get_hostname() -> str:
@@ -544,13 +555,16 @@ def main():
     if args.reporter is None:
         args.reporter = get_hostname()
 
+    # 自动规范化输出文件名（空格→短线）
+    output_path = normalize_filename(args.output)
+
     report = generate_report(data, args.reporter, args.week, args.title)
 
-    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    with open(args.output, "w", encoding="utf-8") as f:
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write(report)
 
-    print(f"周报已生成: {args.output}")
+    print(f"周报已生成: {output_path}")
     print(f"共使用 {len(data.get('ai_merged_topics', []))} 个合并主题")
 
 

@@ -467,14 +467,17 @@ def main():
 
     html = generate_html(md_text, args.title)
 
-    output_path = Path(args.output)
+    # 自动规范化输出文件名（空格→短线）
+    output_name = re.sub(r'\s+', '-', args.output).strip()
+    output_name = re.sub(r'[\\/:*?"<>|]', '', output_name)
+    output_path = Path(output_name)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
 
     # 提取实际用的标题
     actual_title = args.title or extract_title_from_markdown(md_text)
-    print(f"HTML 已生成: {args.output}")
+    print(f"HTML 已生成: {output_name}")
     print(f"标题: {actual_title}")
     print(f"大小: {len(html)} bytes")
 
