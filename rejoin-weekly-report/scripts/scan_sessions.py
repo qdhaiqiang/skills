@@ -2,15 +2,23 @@
 """
 扫描 rejoin 的 SQLite 数据库，提取所有 Agent 会话，按项目归类。
 直接读取 rejoin 的 index.db，不依赖 HTTP API。
+
+输出内容：
+- 会话元数据（工具、项目、消息数等）
+- 会话原始对话内容（用户消息 + 助手关键输出），供后续 AI 分析使用
+- 不做启发式话题拆分——话题提取由 Agent（LLM）在后续步骤完成
 """
 
 import argparse
 import json
 import sqlite3
 import re
+import os
 from pathlib import Path
 from datetime import datetime, timedelta
 from collections import defaultdict
+from glob import glob
+from typing import Optional
 
 
 def get_week_start() -> str:
@@ -89,7 +97,7 @@ def is_noise_line(line: str) -> bool:
 
 
 def build_summary(*candidates: str, limit: int = 140) -> str:
-    """从多个候选文本中提取更自然的会话摘要。"""
+    """从多个候选文本中提取更自然的会话摘要（fallback）。"""
     sentences = []
 
     for candidate in candidates:
@@ -138,7 +146,233 @@ def build_title(ai_title: str, codex_summary: str, summary: str) -> str:
     return ""
 
 
-def scan_sessions(db_path: str, exclude: list[str], since: str) -> list[dict]:
+# ============================================================
+# 会话文件读取——提取原始对话内容供 AI 分析
+# ============================================================
+
+# 系统上下文前缀，需要跳过
+SYSTEM_PREFIXES = [
+    "<permissions", "<app-context", "<collaboration", "<apps_instructions",
+    "<skills_instructions", "<plugins_instructions", "<recommended",
+    "<environment_context", "# AGENTS.md", "# Environment Context",
+    "cwd:", "current_date:", "<system",
+    "@scripts/", "请使用中文",
+    "AGENTS.md", "Filesystem sandboxing",
+]
+
+
+def is_system_context(text: str) -> bool:
+    """判断是否为系统上下文（非用户真实提问）"""
+    if not text:
+        return True
+    stripped = text.strip()
+    if len(stripped) < 10:
+        return True
+    for prefix in SYSTEM_PREFIXES:
+        if stripped.startswith(prefix):
+            return True
+    return False
+
+
+def extract_conversation_codex(lines: list[dict]) -> list[dict]:
+    """
+    从 codex 会话 JSONL 中提取对话内容。
+    返回 [{role: "user"|"assistant", text: str}, ...]
+    """
+    conversation = []
+
+    for obj in lines:
+        t = obj.get("type")
+
+        # 方式1: event_msg 中的 user_message / agent_message
+        if t == "event_msg":
+            payload = obj.get("payload", {})
+            ptype = payload.get("type", "")
+            if ptype == "user_message":
+                content = payload.get("content")
+                if content and isinstance(content, str) and len(content.strip()) > 10:
+                    conversation.append({"role": "user", "text": content.strip()})
+            elif ptype == "agent_message":
+                content = payload.get("content")
+                if content and isinstance(content, str) and len(content.strip()) > 10:
+                    conversation.append({"role": "assistant", "text": content.strip()})
+
+        # 方式2: response_item 中的 message (input_text / output_text)
+        if t == "response_item":
+            payload = obj.get("payload", {})
+            if payload.get("type") == "message":
+                content = payload.get("content", [])
+                if isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict):
+                            itype = item.get("type", "")
+                            text = item.get("text", "")
+                            if not text or len(text.strip()) < 10:
+                                continue
+                            if itype == "input_text" and not is_system_context(text):
+                                conversation.append({"role": "user", "text": text.strip()})
+                            elif itype == "output_text":
+                                conversation.append({"role": "assistant", "text": text.strip()})
+
+    return conversation
+
+
+def extract_conversation_pi(lines: list[dict]) -> list[dict]:
+    """
+    从 pi 会话 JSONL 中提取对话内容。
+    返回 [{role: "user"|"assistant", text: str}, ...]
+    """
+    conversation = []
+
+    for obj in lines:
+        if obj.get("type") != "message":
+            continue
+        msg = obj.get("message", {})
+        role = msg.get("role", "")
+        if role not in ("user", "assistant"):
+            continue
+
+        content = msg.get("content", "")
+        text = ""
+
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    text = item.get("text", "")
+                    break
+                elif isinstance(item, str):
+                    text = item
+                    break
+
+        if not text or len(text.strip()) < 10:
+            continue
+        if role == "user" and is_system_context(text):
+            continue
+
+        conversation.append({"role": role, "text": text.strip()})
+
+    return conversation
+
+
+def find_pi_session_file(session_id: str) -> Optional[str]:
+    """在 pi 会话目录下搜索指定 ID 的会话文件"""
+    pi_dir = Path.home() / ".pi" / "agent" / "sessions"
+    if not pi_dir.exists():
+        return None
+    pattern = f"**/*{session_id}*.jsonl"
+    matches = sorted(glob(str(pi_dir / pattern), recursive=True))
+    return matches[0] if matches else None
+
+
+def resolve_session_path(path: str, tool: str, session_id: str) -> Optional[str]:
+    """
+    解析会话文件的实际路径。
+    codex: 直接使用 path
+    pi: path 是 agent-sessions:// URI，需在 ~/.pi/agent/sessions/ 下查找
+    """
+    if not path:
+        return None
+
+    if path.startswith("agent-sessions://"):
+        return find_pi_session_file(session_id)
+
+    if os.path.exists(path):
+        return path
+
+    return None
+
+
+def read_conversation(path: str, tool: str) -> list[dict]:
+    """
+    读取会话 JSONL 文件，提取对话内容。
+    返回 [{role, text}, ...] 列表。
+    """
+    if not path or not os.path.exists(path):
+        return []
+
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            raw_lines = f.readlines()
+    except (OSError, IOError):
+        return []
+
+    # 解析 JSONL
+    parsed = []
+    for line in raw_lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            parsed.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    if not parsed:
+        return []
+
+    if tool == "pi":
+        return extract_conversation_pi(parsed)
+    elif tool == "codex":
+        return extract_conversation_codex(parsed)
+    else:
+        conv = extract_conversation_pi(parsed)
+        if not conv:
+            conv = extract_conversation_codex(parsed)
+        return conv
+
+
+def truncate_conversation(conversation: list[dict], max_user_msgs: int = 10,
+                          max_total_chars: int = 8000) -> list[dict]:
+    """
+    截断对话内容到合理大小：
+    - 最多保留 max_user_msgs 条用户消息
+    - 每条消息最多截断到合理长度
+    - 总字符数不超过 max_total_chars
+    """
+    result = []
+    user_count = 0
+    total_chars = 0
+
+    for msg in conversation:
+        role = msg.get("role", "")
+        text = msg.get("text", "")
+
+        if role == "user":
+            user_count += 1
+            if user_count > max_user_msgs:
+                continue
+
+        # 截断过长消息
+        if len(text) > 2000:
+            text = text[:1000] + "\n\n[...] " + text[-500:]
+
+        if total_chars + len(text) > max_total_chars:
+            # 尝试截断当前消息
+            remaining = max_total_chars - total_chars
+            if remaining > 500:
+                text = text[:remaining - 100] + "\n\n[... 截断]"
+            else:
+                result.append({
+                    "role": "truncated",
+                    "text": f"[会话过长，后续内容已截断，共 {len(conversation)} 条消息]"
+                })
+                break
+
+        result.append({"role": role, "text": text})
+        total_chars += len(text)
+
+    return result
+
+
+# ============================================================
+# 扫描逻辑
+# ============================================================
+
+
+def scan_sessions(db_path: str, exclude: list[str], since: str,
+                  include_messages: bool = True) -> list[dict]:
     """从 rejoin 数据库中读取会话列表"""
     if not Path(db_path).exists():
         raise FileNotFoundError(f"rejoin 数据库不存在: {db_path}")
@@ -147,7 +381,7 @@ def scan_sessions(db_path: str, exclude: list[str], since: str) -> list[dict]:
     conn.row_factory = sqlite3.Row
 
     query = """
-        SELECT s.id, s.tool, s.cwd, s.started_at, s.last_activity,
+        SELECT s.id, s.tool, s.cwd, s.path, s.started_at, s.last_activity,
                s.message_count, s.tool_call_count, s.model,
                s.first_prompt, s.last_prompt, s.codex_summary,
                t.title as ai_title
@@ -175,7 +409,7 @@ def scan_sessions(db_path: str, exclude: list[str], since: str) -> list[dict]:
         if excluded:
             continue
 
-        # 提取摘要
+        # 提取摘要（DB 层面的 fallback）
         ai_title = d.get("ai_title") or ""
         codex_summary = d.get("codex_summary") or ""
         first_prompt = d.get("first_prompt") or ""
@@ -183,11 +417,12 @@ def scan_sessions(db_path: str, exclude: list[str], since: str) -> list[dict]:
         summary = build_summary(codex_summary, ai_title, first_prompt, last_prompt)
         title = build_title(ai_title, codex_summary, summary)
 
-        sessions.append({
+        session_info = {
             "id": d["id"],
             "tool": d["tool"],
             "project": project,
             "cwd": cwd,
+            "session_file_path": "",  # 解析后的实际文件路径
             "started_at": d.get("started_at"),
             "last_activity": d.get("last_activity"),
             "message_count": d.get("message_count", 0),
@@ -197,7 +432,30 @@ def scan_sessions(db_path: str, exclude: list[str], since: str) -> list[dict]:
             "summary": summary,
             "raw_title": ai_title,
             "codex_summary": codex_summary,
-        })
+            # 以下字段在后续步骤由 AI 填充
+            "ai_topics": [],       # [{topic: "...", summary: "..."}, ...]
+            "ai_analysis": "",     # AI 对会话的整体分析
+        }
+
+        # 解析会话文件路径
+        raw_path = d.get("path") or ""
+        resolved = resolve_session_path(raw_path, d["tool"], d["id"])
+        if resolved:
+            session_info["session_file_path"] = resolved
+            session_info["session_file_exists"] = True
+        else:
+            session_info["session_file_exists"] = False
+
+        # 读取对话内容（供 AI 分析用）
+        if include_messages and resolved:
+            conversation = read_conversation(resolved, d["tool"])
+            session_info["conversation"] = truncate_conversation(conversation)
+            session_info["conversation_msg_count"] = len(conversation)
+        else:
+            session_info["conversation"] = []
+            session_info["conversation_msg_count"] = 0
+
+        sessions.append(session_info)
 
     return sessions
 
@@ -205,20 +463,28 @@ def scan_sessions(db_path: str, exclude: list[str], since: str) -> list[dict]:
 def main():
     default_db = str(Path.home() / ".local" / "share" / "rejoin" / "index.db")
 
-    parser = argparse.ArgumentParser(description="扫描 rejoin Agent 会话")
+    parser = argparse.ArgumentParser(
+        description="扫描 rejoin Agent 会话（提取原始对话供 AI 分析）"
+    )
     parser.add_argument("--output", required=True, help="输出 JSON 文件路径")
     parser.add_argument("--db", default=default_db, help="rejoin 数据库路径")
     parser.add_argument("--exclude", action="append", default=[],
                         help="要排除的项目关键字（可多次指定）")
     parser.add_argument("--since", default=get_week_start(),
                         help="起始日期 YYYY-MM-DD（默认本周一）")
+    parser.add_argument("--no-messages", action="store_true",
+                        help="不包含对话内容（仅元数据）")
     args = parser.parse_args()
+
+    include_messages = not args.no_messages
 
     print(f"扫描 rejoin 数据库: {args.db}")
     print(f"时间范围: {args.since} ~ 今天")
     print(f"排除项目: {args.exclude}")
+    print(f"包含对话内容: {'是' if include_messages else '否'}")
 
-    sessions = scan_sessions(args.db, args.exclude, args.since)
+    sessions = scan_sessions(args.db, args.exclude, args.since,
+                             include_messages=include_messages)
 
     # 按项目分组统计
     by_project = defaultdict(list)
@@ -227,10 +493,12 @@ def main():
 
     project_stats = {}
     for proj, items in sorted(by_project.items(), key=lambda x: -len(x[1])):
+        has_conversation = sum(1 for s in items if s.get("conversation_msg_count", 0) > 0)
         project_stats[proj] = {
             "count": len(items),
             "total_messages": sum(s["message_count"] for s in items),
             "tools_used": list(set(s["tool"] for s in items)),
+            "sessions_with_conversation": has_conversation,
             "top_sessions": [
                 {
                     "id": s["id"],
@@ -239,28 +507,51 @@ def main():
                     "summary": s["summary"],
                     "message_count": s["message_count"],
                     "tool_call_count": s["tool_call_count"],
+                    "conversation_msg_count": s.get("conversation_msg_count", 0),
+                    "session_file_exists": s.get("session_file_exists", False),
                     "last_activity": s["last_activity"],
                 }
                 for s in items[:5]
             ],
         }
 
+    stats = {
+        "sessions_with_conversation": sum(
+            1 for s in sessions if s.get("conversation_msg_count", 0) > 0
+        ),
+        "total_conversation_messages": sum(
+            s.get("conversation_msg_count", 0) for s in sessions
+        ),
+        "sessions_without_file": sum(
+            1 for s in sessions if not s.get("session_file_exists", False)
+        ),
+    }
+
     result = {
         "scan_time": datetime.now().isoformat(),
         "since": args.since,
         "total_sessions": len(sessions),
         "excluded_projects": args.exclude,
+        "stats": stats,
         "projects": project_stats,
         "sessions": sessions,
+        # 以下字段在后续步骤由 AI 填充
+        "ai_merged_topics": [],  # [{project, topic, summary, session_ids}, ...]
     }
 
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
 
     print(f"\n共 {len(sessions)} 个会话，分布在 {len(project_stats)} 个项目:")
-    for proj, stats in sorted(project_stats.items(), key=lambda x: -x[1]["count"]):
-        print(f"  {proj}: {stats['count']} sessions")
+    for proj, pstats in sorted(project_stats.items(), key=lambda x: -x[1]["count"]):
+        conv_info = f"，{pstats['sessions_with_conversation']} 个含对话内容" if pstats['sessions_with_conversation'] else "（无对话文件）"
+        print(f"  {proj}: {pstats['count']} 个会话{conv_info}")
+    print(f"\n含对话内容的会话: {stats['sessions_with_conversation']}/{len(sessions)}")
+    print(f"对话消息总数: {stats['total_conversation_messages']}")
+    print(f"无会话文件的: {stats['sessions_without_file']}")
     print(f"\n结果已保存到: {args.output}")
+    print(f"\n下一步：Agent 应读取该 JSON 中每个会话的 'conversation' 字段，")
+    print(f"用 AI 分析每个会话解决的多个问题，然后合并跨会话的相同主题。")
 
 
 if __name__ == "__main__":
