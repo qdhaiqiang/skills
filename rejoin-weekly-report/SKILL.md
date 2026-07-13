@@ -190,7 +190,7 @@ python3 {SKILL_DIR}/scripts/generate_report.py --input rejoin_weekly.json --outp
 python3 {SKILL_DIR}/scripts/generate_report.py --input rejoin_weekly.json --output 周报.md --reporter "张三"
 ```
 
-- `--reporter`：汇报人（可选，默认本机计算机名）
+- `--reporter`：汇报人（可选，默认 `xxx`，未指定时输出文件名中的汇报人部分用 `xxx` 代替）
 - `--week`：周数（可选，默认当前周）
 - `--title`：汇报标题（可选，默认"青岛红创 第 N 周工作展示汇报"）
 
@@ -201,7 +201,10 @@ python3 {SKILL_DIR}/scripts/generate_report.py --input rejoin_weekly.json --outp
 1. 读取步骤 1 生成的 `rejoin_weekly.json` 了解所有项目的会话数据 + AI 分析结果
 2. 读取步骤 2 生成的 `周报.md` 模板
 3. **AI 分析结果已自动体现在报告中**（工作项表格使用 `ai_merged_topics`，项目摘要使用跨会话合并主题）
-4. 将填充后的最终报告写入与标题一致的文件名（标题中的空格替换为短线 `-`），例如标题是 `青岛红创 第 24 周工作展示汇报`，则写入 `青岛红创-第-24-周工作展示汇报.md`
+4. 将填充后的最终报告写入与标题一致的文件名（标题中的空格替换为短线 `-`），文件名末尾附加汇报人名称。
+   - 格式：`{标题}-{汇报人}.md`
+   - 例如：汇报人是 `张三`，标题是 `青岛红创 第 24 周工作展示汇报`，则写入 `青岛红创-第-24-周工作展示汇报-张三.md`
+   - 如果用户未指定汇报人，`generate_report.py` 会默认使用 `xxx`，则写入 `青岛红创-第-24-周工作展示汇报-xxx.md`
 
 填充要点：
 

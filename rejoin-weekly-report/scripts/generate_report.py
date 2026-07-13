@@ -10,7 +10,6 @@
 import argparse
 import json
 import re
-import socket
 from datetime import datetime
 from pathlib import Path
 
@@ -23,11 +22,6 @@ def normalize_filename(name: str) -> str:
     # 去除路径中不允许的字符（保留中文、字母、数字、短线、下划线、点）
     name = re.sub(r'[\\/:*?"<>|]', '', name)
     return name
-
-
-def get_hostname() -> str:
-    """获取当前计算机名（去掉 .local 等后缀）"""
-    return socket.gethostname().split(".")[0]
 
 
 WEEKLY_REPORT_TEMPLATE = """# {title}
@@ -153,6 +147,32 @@ WEEKLY_REPORT_TEMPLATE = """# {title}
 """
 
 
+def _is_meaningful_work(text: str) -> bool:
+    """判断 AI 分析是否描述了具体的实际开发工作（代码修改、功能实现等）。
+    如果描述中包含了开发动作关键词且有足够的内容量，认定为可验证的已完成工作。"""
+    if not text or len(text.strip()) < 10:
+        return False
+    work_keywords = [
+        "修复", "新增", "添加", "实现", "完成", "修改", "更新", "优化",
+        "重构", "对接", "集成", "开发", "解决", "升级", "迁移", "调整",
+        "删除", "配置", "编写", "封装", "提取", "拆分", "合并",
+        "接入", "适配", "集成", "移植", "部署",
+        "CRUD", "UI", "API", "接口", "页面", "组件",
+    ]
+    return any(kw in text for kw in work_keywords)
+
+
+def _determine_status(topic: str, summary: str) -> str:
+    """根据 AI 分析内容的详实程度判断工作状态。"""
+    text = summary or topic
+    if _is_meaningful_work(text):
+        return "✅完成"
+    elif text and len(text.strip()) > 5:
+        return "分析中"
+    else:
+        return "待确认"
+
+
 def short_text(text: str, limit: int = 48) -> str:
     text = " ".join((text or "").split())
     if len(text) <= limit:
@@ -250,10 +270,14 @@ def format_work_items(projects: dict, merged_topics: list) -> str:
             seen.add(key)
 
             multiple = f"（跨 {session_count} 个会话）" if session_count > 1 else ""
-            evidence = f"AI 分析识别{multiple}"
-            remark = short_text(summary, 72) if summary else "-"
+            # 证据/结果列展示实际功能描述（之前写在备注中的内容）
+            evidence_result = short_text(summary, 120) if summary else short_text(topic, 72)
+            # 备注列展示元信息（之前写在证据/结果中的内容）
+            remark = f"AI 分析识别{multiple}"
+            # 状态：根据 AI 分析内容判断是否有实际开发产出
+            status = _determine_status(topic, summary)
             lines.append(
-                f"| [{proj}] {short_text(topic, 56)} | 待确认 | {evidence} | {remark} |"
+                f"| [{proj}] {short_text(topic, 56)} | {status} | {evidence_result} | {remark} |"
             )
 
     # 如果合并主题不够多，再补充会话级别的条目
@@ -268,13 +292,16 @@ def format_work_items(projects: dict, merged_topics: list) -> str:
             remaining += 1
             if remaining > 10:
                 break
-            evidence = (
+            # 证据/结果列展示会话标题/摘要（实际工作内容）
+            evidence_result = short_text(session.get("summary") or label, 72)
+            # 备注列展示会话元信息
+            remark = (
                 f"rejoin 会话：{session.get('message_count', 0)} 条消息 / "
                 f"{session.get('tool_call_count', 0)} 次调用 / "
                 f"{session.get('tool', '-')}"
             )
-            remark = short_text(session.get("summary") or "-", 72)
-            lines.append(f"| [{proj}] {label} | 待确认 | {evidence} | {remark} |")
+            status = _determine_status(label, session.get("summary", ""))
+            lines.append(f"| [{proj}] {label} | {status} | {evidence_result} | {remark} |")
         if remaining > 10:
             break
 
@@ -553,10 +580,12 @@ def main():
         args.title = f"青岛红创 第 {args.week} 周工作展示汇报"
 
     if args.reporter is None:
-        args.reporter = get_hostname()
+        args.reporter = "xxx"
 
-    # 自动规范化输出文件名（空格→短线）
-    output_path = normalize_filename(args.output)
+    # 自动规范化输出文件名（空格→短线），嵌入汇报人名称
+    base_name, ext = Path(args.output).stem, Path(args.output).suffix or ""
+    output_name = f"{base_name}-{args.reporter}{ext}"
+    output_path = normalize_filename(output_name)
 
     report = generate_report(data, args.reporter, args.week, args.title)
 

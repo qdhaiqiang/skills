@@ -193,6 +193,9 @@ td {
   padding: 10px 16px;
   border-bottom: 1px solid var(--gray-200);
   color: var(--gray-700);
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
 }
 tbody tr:hover {
   background: var(--blue-50);
