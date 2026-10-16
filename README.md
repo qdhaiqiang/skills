@@ -12,6 +12,7 @@ npx skills@latest add qdhaiqiang/skills
 
 # 单独安装某个 skill
 npx skills@latest add qdhaiqiang/skills --skill rejoin-weekly-report
+npx skills@latest add qdhaiqiang/skills --skill screen-demo-video
 ```
 
 这会将 skill 安装到 `~/.agents/skills/`，pi、Claude Code、Codex 启动时自动发现并加载。
@@ -47,6 +48,28 @@ npx skills@latest add qdhaiqiang/skills --skill rejoin-weekly-report
 - HTML 文件名、页面标题与周报标题保持一致
 - 仅以本地 rejoin 会话为数据源，不读取 git commit / PR / 仓库变更历史
 
+### screen-demo-video
+
+把软件操作录屏（后台/IDE/PLC 工具演示）做成带中文旁白、逐句字幕、行驻式运镜与控件标注的讲解视频。合成层用 HyperFrames，本 skill 负责业务流水线与交付前的七道验收。
+
+```bash
+npx skills@latest add qdhaiqiang/skills --skill screen-demo-video
+```
+
+**使用方式**：
+
+1. 给出录屏文件，对 Agent 说：**"处理这段录屏，做成讲解视频"**（或"做成 PC 版 + 手机竖版"）
+2. Agent 先确认两件事：**观看端**（PC 2560×1440 / 手机竖屏 9:16）与**声音来源**（保留原声 / 补录旁白 / 混合）
+3. 之后按流水线走：切 span → 音频对齐 → 词级转写 → `plan.mjs` 分镜 → 接触表逐框核对 → 分段渲染 → 七道验收 → 交付
+
+**特性**：
+- 真实录屏一律 1.0× 不倍速，要缩短只能按段落裁且切点落在停顿里
+- 每个放大框/点击框压在真实文字或按钮上，坐标按源帧实测，交付前逐个核对
+- 竖屏版字幕放在录制卡片下方的独立字幕带，全片固定字号（文字长了只换行）
+- 静默但有操作的段落不空转：关键词浮层随语音逐个弹入
+- 交付前必须证明旁白真的混进成片（逐拍能量与纯铺底窗口对照）
+- 自带 20 个量具脚本（转写、能量、运镜节奏、标注出画、空白取景、音质对照等）与横竖屏工程模板
+
 ## 目录结构
 
 每个 skill 是一个独立目录，包含 `SKILL.md` 入口文件和配套脚本：
@@ -60,6 +83,11 @@ npx skills@latest add qdhaiqiang/skills --skill rejoin-weekly-report
 │   │   └── generate_report.py
 │   └── references/           # 参考文档
 │       └── template.md
+├── screen-demo-video/
+│   ├── SKILL.md              # 流水线与硬性口径
+│   ├── references/           # targets / pipeline / verification / pitfalls
+│   ├── scripts/              # 量具与转写脚本（含 tools/ 坐标量具）
+│   └── assets/templates/     # 横屏(PC) 与竖屏(手机) 工程模板
 └── README.md
 ```
 

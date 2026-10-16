@@ -1,10 +1,17 @@
 {
   "name": "@qdhaiqiang/skills",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Agent Skills 集合，适用于 pi、Claude Code、Codex 等 AI 编码助手",
-  "keywords": ["pi-package", "agent-skills", "ai-skills"],
+  "keywords": [
+    "pi-package",
+    "agent-skills",
+    "ai-skills"
+  ],
   "license": "MIT",
   "pi": {
-    "skills": ["./rejoin-weekly-report"]
+    "skills": [
+      "./rejoin-weekly-report",
+      "./screen-demo-video"
+    ]
   }
 }
