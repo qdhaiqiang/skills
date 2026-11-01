@@ -22,7 +22,7 @@ description: 从本地 rejoin 工具扫描本机所有 Agent（pi、codex、clau
 ## 核心规则（必须遵守）
 
 1. **只运行本 skill 自带的脚本**，不得自行编写新的 Python 脚本、不得遍历 Git 仓库、不得读取 `git log` / commit / PR、不得用其他方式收集数据
-2. **数据来源只有 rejoin 的 SQLite 数据库**（默认 `~/.local/share/rejoin/index.db`）+ 关联的会话 JSONL 文件
+2. **数据来源只有 rejoin 的 SQLite 数据库 + Qoder 本地数据库 + 关联的会话文件**。rejoin 库路径跨平台自动探测（macOS/Linux：`~/.local/share/rejoin/index.db`；Windows：`%LOCALAPPDATA%\rejoin\index.db` 或 `%APPDATA%\rejoin\index.db`，也可用环境变量 `REJOIN_DB` 指定）；Qoder 不经 rejoin，直接读其本地库（macOS：`~/Library/Application Support/com.qoder.app.stable/main.sqlite`；Windows：`%APPDATA%\com.qoder.app.stable\main.sqlite` 或 `%LOCALAPPDATA%\com.qoder.app.stable\main.sqlite`，也可用环境变量 `QODER_DB` 指定）
 3. **扫描覆盖本机全部项目和全部 Agent 工具**，不受当前工作目录影响
 4. 脚本路径相对于本 SKILL.md 所在目录，即 `{SKILL_DIR}/scripts/`
 5. **生成内容必须保守**：只能陈述 rejoin 会话能直接支持的事实，不能把推测内容、git 提交记录、他人工作结果写成当前汇报人的周报结论
@@ -80,9 +80,11 @@ python3 {SKILL_DIR}/scripts/scan_sessions.py --output rejoin_weekly.json --exclu
 - `--exclude`：要排除的项目关键字，可多次指定（可选）
 - `--since`：起始日期 `YYYY-MM-DD`（可选，默认本周一）
 - `--no-messages`：不包含对话内容（仅元数据，可选）
+- `--no-qoder`：跳过 Qoder 会话扫描（可选，默认包含）
 - 脚本直读 `~/.local/share/rejoin/index.db`，无需额外配置
 - **脚本会自动读取每个会话的 JSONL 文件**，提取用户消息和助手回复，存入 `conversation` 字段
 - pi 会话文件从 `~/.pi/agent/sessions/` 查找，codex 会话从 `~/.codex/sessions/` 读取
+- Qoder 会话直读其本地 SQLite：`chat_sessions` 表取标题/工作目录/时间，`chat_session_messages.payload_json` 中提取 `parts[type=text].text` 作为对话内容，工具标记为 `qoder`
 
 输出 JSON 文件结构：
 

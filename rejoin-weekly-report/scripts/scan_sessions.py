@@ -28,6 +28,40 @@ def get_week_start() -> str:
     return monday.strftime("%Y-%m-%d")
 
 
+def find_rejoin_db() -> str:
+    """跨平台查找 rejoin 数据库路径（macOS / Linux / Windows）"""
+    home = Path.home()
+    candidates = [
+        home / ".local" / "share" / "rejoin" / "index.db",          # macOS / Linux
+        home / "AppData" / "Local" / "rejoin" / "index.db",         # Windows (LOCALAPPDATA)
+        home / "AppData" / "Roaming" / "rejoin" / "index.db",       # Windows (APPDATA)
+    ]
+    env = os.environ.get("REJOIN_DB")
+    if env:
+        candidates.insert(0, Path(env))
+    for c in candidates:
+        if c.exists():
+            return str(c)
+    return str(candidates[0])  # 返回默认路径，让上层报出明确的 FileNotFoundError
+
+
+def find_qoder_db() -> Optional[str]:
+    """跨平台查找 Qoder 主数据库路径（macOS / Windows）"""
+    home = Path.home()
+    candidates = [
+        home / "Library" / "Application Support" / "com.qoder.app.stable" / "main.sqlite",  # macOS
+        home / "AppData" / "Roaming" / "com.qoder.app.stable" / "main.sqlite",              # Windows
+        home / "AppData" / "Local" / "com.qoder.app.stable" / "main.sqlite",                # Windows 备选
+    ]
+    env = os.environ.get("QODER_DB")
+    if env:
+        candidates.insert(0, Path(env))
+    for c in candidates:
+        if c.exists():
+            return str(c)
+    return None
+
+
 def normalize_project(cwd: str) -> str:
     """将 cwd 路径归类为项目名"""
     if not cwd:
@@ -367,6 +401,127 @@ def truncate_conversation(conversation: list[dict], max_user_msgs: int = 10,
 
 
 # ============================================================
+# Qoder 会话读取——直接扫描 Qoder 本地 main.sqlite
+# ============================================================
+
+def extract_qoder_text(payload_json: str) -> str:
+    """从 Qoder 消息的 payload_json 中提取纯文本（parts 中 type=text 的 text 字段）"""
+    if not payload_json:
+        return ""
+    try:
+        payload = json.loads(payload_json)
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    parts = payload.get("parts") or []
+    texts = []
+    for part in parts:
+        if isinstance(part, dict) and part.get("type") == "text":
+            t = part.get("text", "")
+            if t:
+                texts.append(t)
+    return "\n".join(texts).strip()
+
+
+def scan_qoder_sessions(exclude: list[str], since: str,
+                        include_messages: bool = True) -> list[dict]:
+    """扫描 Qoder 本地 SQLite 数据库中的会话（不经 rejoin）"""
+    db_path = find_qoder_db()
+    if not db_path:
+        print("Qoder 数据库未找到，跳过 Qoder 扫描")
+        return []
+
+    print(f"扫描 Qoder 数据库: {db_path}")
+    since_ms = int(datetime.strptime(since, "%Y-%m-%d").timestamp() * 1000)
+
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT session_id, title, cwd, model, created_at, updated_at
+            FROM chat_sessions
+            WHERE updated_at >= :since AND deleted_at IS NULL
+            ORDER BY updated_at DESC
+            """,
+            {"since": since_ms},
+        ).fetchall()
+
+        msg_counts = dict(conn.execute(
+            "SELECT session_id, count(*) FROM chat_session_messages GROUP BY session_id"
+        ).fetchall())
+
+        conversations = {}
+        if include_messages and rows:
+            ids = [r["session_id"] for r in rows]
+            placeholders = ",".join("?" for _ in ids)
+            msgs = conn.execute(
+                f"""
+                SELECT session_id, role, payload_json
+                FROM chat_session_messages
+                WHERE session_id IN ({placeholders})
+                ORDER BY session_id, sequence
+                """,
+                ids,
+            ).fetchall()
+            for m in msgs:
+                role = m["role"] or ""
+                if role not in ("user", "assistant"):
+                    continue
+                text = extract_qoder_text(m["payload_json"])
+                if not text or len(text) < 10:
+                    continue
+                if role == "user" and is_system_context(text):
+                    continue
+                conversations.setdefault(m["session_id"], []).append(
+                    {"role": role, "text": text})
+        conn.close()
+    except sqlite3.Error as e:
+        print(f"Qoder 数据库读取失败: {e}，跳过 Qoder 扫描")
+        return []
+
+    sessions = []
+    for r in rows:
+        cwd = r["cwd"] or ""
+        project = normalize_project(cwd)
+
+        excluded = any(
+            exc.lower() in cwd.lower() or exc.lower() in project.lower()
+            for exc in exclude
+        )
+        if excluded:
+            continue
+
+        title = re.sub(r"\s+", " ", clean_text(r["title"] or "")).strip()
+        summary = build_summary(title)
+        conv = conversations.get(r["session_id"], [])
+
+        sessions.append({
+            "id": r["session_id"],
+            "tool": "qoder",
+            "project": project,
+            "cwd": cwd,
+            "session_file_path": db_path,
+            "session_file_exists": True,
+            "started_at": datetime.fromtimestamp(r["created_at"] / 1000).isoformat() if r["created_at"] else None,
+            "last_activity": datetime.fromtimestamp(r["updated_at"] / 1000).strftime("%Y-%m-%d") if r["updated_at"] else None,
+            "message_count": msg_counts.get(r["session_id"], 0),
+            "tool_call_count": 0,
+            "model": r["model"],
+            "title": title[:80],
+            "summary": summary,
+            "raw_title": title,
+            "codex_summary": "",
+            "conversation": truncate_conversation(conv),
+            "conversation_msg_count": len(conv),
+            "ai_topics": [],
+            "ai_analysis": "",
+        })
+
+    print(f"Qoder: {len(sessions)} 个会话")
+    return sessions
+
+
+# ============================================================
 # 扫描逻辑
 # ============================================================
 
@@ -461,13 +616,15 @@ def scan_sessions(db_path: str, exclude: list[str], since: str,
 
 
 def main():
-    default_db = str(Path.home() / ".local" / "share" / "rejoin" / "index.db")
+    default_db = find_rejoin_db()
 
     parser = argparse.ArgumentParser(
-        description="扫描 rejoin Agent 会话（提取原始对话供 AI 分析）"
+        description="扫描 rejoin Agent 会话（提取原始对话供 AI 分析），并补充 Qoder 本地会话"
     )
     parser.add_argument("--output", required=True, help="输出 JSON 文件路径")
     parser.add_argument("--db", default=default_db, help="rejoin 数据库路径")
+    parser.add_argument("--no-qoder", action="store_true",
+                        help="跳过 Qoder 会话扫描")
     parser.add_argument("--exclude", action="append", default=[],
                         help="要排除的项目关键字（可多次指定）")
     parser.add_argument("--since", default=get_week_start(),
@@ -485,6 +642,10 @@ def main():
 
     sessions = scan_sessions(args.db, args.exclude, args.since,
                              include_messages=include_messages)
+
+    if not args.no_qoder:
+        sessions.extend(scan_qoder_sessions(args.exclude, args.since,
+                                            include_messages=include_messages))
 
     # 按项目分组统计
     by_project = defaultdict(list)
